@@ -44,6 +44,9 @@ class Person(db.Model):
     instagram = db.Column(db.String)
     facebook = db.Column(db.String)
     linkedin = db.Column(db.String)
+    marital_status = db.Column(db.String)  # 既婚・未婚
+    has_children = db.Column(db.String)     # 子供あり・なし
+    has_pets = db.Column(db.String)         # ペットあり・なし
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
@@ -103,11 +106,12 @@ with app.app_context():
             ))
             conn.commit()
 
-        # Add SNS columns to people
+        # Add SNS and personal info columns to people
         people_cols = [c["name"] for c in inspector.get_columns("people")]
-        for sns_col in ["twitter", "instagram", "facebook", "linkedin"]:
-            if sns_col not in people_cols:
-                conn.execute(text(f"ALTER TABLE people ADD COLUMN {sns_col} VARCHAR"))
+        new_cols = ["twitter", "instagram", "facebook", "linkedin", "marital_status", "has_children", "has_pets"]
+        for col in new_cols:
+            if col not in people_cols:
+                conn.execute(text(f"ALTER TABLE people ADD COLUMN {col} VARCHAR"))
                 conn.commit()
 
 
@@ -963,6 +967,9 @@ def add():
             organization=request.form.get("organization", "").strip(),
             met_at=request.form.get("met_at", "").strip(),
             birthday=request.form.get("birthday", "").strip() or None,
+            marital_status=request.form.get("marital_status", "").strip() or None,
+            has_children=request.form.get("has_children", "").strip() or None,
+            has_pets=request.form.get("has_pets", "").strip() or None,
             notes=request.form.get("notes", "").strip(),
         )
         db.session.add(person)
@@ -992,6 +999,9 @@ def _form(error=None, person=None, prefill_name="", prefill_birthday="", link_fa
     org = escape(person.organization or "") if person else ""
     met = escape(person.met_at or "") if person else ""
     birthday = escape(person.birthday or "") if person else escape(prefill_birthday)
+    marital_status = escape(person.marital_status or "") if person else ""
+    has_children = escape(person.has_children or "") if person else ""
+    has_pets = escape(person.has_pets or "") if person else ""
     notes = escape(person.notes or "") if person else ""
     action = f'/edit/{person.id}' if person else "/add"
     title = "人物情報を編集" if person else "新しい人物を登録"
@@ -1024,6 +1034,30 @@ def _form(error=None, person=None, prefill_name="", prefill_birthday="", link_fa
         <div class="form-group">
           <label for="birthday">誕生日</label>
           <input type="date" id="birthday" name="birthday" value="{birthday}">
+        </div>
+        <div class="form-group">
+          <label for="marital_status">既婚・未婚</label>
+          <select id="marital_status" name="marital_status">
+            <option value="">選択してください</option>
+            <option value="既婚"{' selected' if marital_status == '既婚' else ''}>既婚</option>
+            <option value="未婚"{' selected' if marital_status == '未婚' else ''}>未婚</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="has_children">子供</label>
+          <select id="has_children" name="has_children">
+            <option value="">選択してください</option>
+            <option value="あり"{' selected' if has_children == 'あり' else ''}>あり</option>
+            <option value="なし"{' selected' if has_children == 'なし' else ''}>なし</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="has_pets">ペット</label>
+          <select id="has_pets" name="has_pets">
+            <option value="">選択してください</option>
+            <option value="あり"{' selected' if has_pets == 'あり' else ''}>あり</option>
+            <option value="なし"{' selected' if has_pets == 'なし' else ''}>なし</option>
+          </select>
         </div>
         <div class="form-group">
           <label for="notes">メモ・特徴</label>
@@ -1197,6 +1231,39 @@ def detail(person_id):
             <input type="date" class="edit-field" name="birthday" value="{escape(bd_value)}" data-field="birthday">
           </div>
         </div>
+        <div class="detail-row">
+          <div class="detail-label">既婚・未婚</div>
+          <div class="detail-value view-mode-only">{escape(person.marital_status) if person.marital_status else '<span style="color:#94a3b8;">未設定</span>'}</div>
+          <div class="edit-mode-field">
+            <select class="edit-field" name="marital_status" data-field="marital_status">
+              <option value="">選択してください</option>
+              <option value="既婚"{' selected' if person.marital_status == '既婚' else ''}>既婚</option>
+              <option value="未婚"{' selected' if person.marital_status == '未婚' else ''}>未婚</option>
+            </select>
+          </div>
+        </div>
+        <div class="detail-row">
+          <div class="detail-label">子供</div>
+          <div class="detail-value view-mode-only">{escape(person.has_children) if person.has_children else '<span style="color:#94a3b8;">未設定</span>'}</div>
+          <div class="edit-mode-field">
+            <select class="edit-field" name="has_children" data-field="has_children">
+              <option value="">選択してください</option>
+              <option value="あり"{' selected' if person.has_children == 'あり' else ''}>あり</option>
+              <option value="なし"{' selected' if person.has_children == 'なし' else ''}>なし</option>
+            </select>
+          </div>
+        </div>
+        <div class="detail-row">
+          <div class="detail-label">ペット</div>
+          <div class="detail-value view-mode-only">{escape(person.has_pets) if person.has_pets else '<span style="color:#94a3b8;">未設定</span>'}</div>
+          <div class="edit-mode-field">
+            <select class="edit-field" name="has_pets" data-field="has_pets">
+              <option value="">選択してください</option>
+              <option value="あり"{' selected' if person.has_pets == 'あり' else ''}>あり</option>
+              <option value="なし"{' selected' if person.has_pets == 'なし' else ''}>なし</option>
+            </select>
+          </div>
+        </div>
         {row("メモ・特徴", person.notes, "notes", "notes", "textarea")}
 
         <div style="margin-top:24px;padding-top:24px;border-top:1px solid #e2e8f0;">
@@ -1264,6 +1331,9 @@ def edit(person_id):
         person.organization = request.form.get("organization", "").strip()
         person.met_at = request.form.get("met_at", "").strip()
         person.birthday = request.form.get("birthday", "").strip() or None
+        person.marital_status = request.form.get("marital_status", "").strip() or None
+        person.has_children = request.form.get("has_children", "").strip() or None
+        person.has_pets = request.form.get("has_pets", "").strip() or None
         person.notes = request.form.get("notes", "").strip()
         person.updated_at = datetime.now()
         db.session.commit()
@@ -1303,6 +1373,11 @@ def update_person(person_id):
     person.instagram = request.form.get("instagram", "").strip() or None
     person.facebook = request.form.get("facebook", "").strip() or None
     person.linkedin = request.form.get("linkedin", "").strip() or None
+
+    # Update personal info fields
+    person.marital_status = request.form.get("marital_status", "").strip() or None
+    person.has_children = request.form.get("has_children", "").strip() or None
+    person.has_pets = request.form.get("has_pets", "").strip() or None
 
     person.updated_at = datetime.now()
     db.session.commit()
