@@ -6,8 +6,14 @@ from datetime import datetime
 from flask import Flask, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
 from markupsafe import escape
+import cloudinary
+import cloudinary.uploader
 
 app = Flask(__name__)
+
+# Cloudinary 設定 (環境変数 CLOUDINARY_URL で自動設定される)
+# 形式: cloudinary://API_KEY:API_SECRET@CLOUD_NAME
+cloudinary.config(secure=True)
 
 # Render は DATABASE_URL に postgres:// を設定するが、
 # SQLAlchemy 2.x は postgresql:// を要求するため置換する
@@ -16,6 +22,7 @@ if database_url.startswith("postgres://"):
     database_url = database_url.replace("postgres://", "postgresql://", 1)
 
 app.config["SQLALCHEMY_DATABASE_URI"] = database_url
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10 MB
 db = SQLAlchemy(app)
 
 
@@ -34,6 +41,23 @@ class Person(db.Model):
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
+
+    events = db.relationship("Event", back_populates="person",
+                             order_by="desc(Event.event_date)",
+                             cascade="all, delete-orphan")
+
+
+class Event(db.Model):
+    __tablename__ = "events"
+
+    id = db.Column(db.Integer, primary_key=True)
+    person_id = db.Column(db.Integer, db.ForeignKey("people.id"), nullable=False)
+    event_date = db.Column(db.String, nullable=False)       # 'YYYY-MM-DD'
+    content = db.Column(db.Text, nullable=False)
+    image_url = db.Column(db.String)                         # Cloudinary URL
+    created_at = db.Column(db.DateTime, default=datetime.now)
+
+    person = db.relationship("Person", back_populates="events")
 
 
 with app.app_context():
@@ -192,6 +216,69 @@ CSS = """
     font-size: .95rem;
   }
 
+  /* Timeline */
+  .timeline-section {
+    margin-top: 32px;
+  }
+  .timeline-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 20px; flex-wrap: wrap; gap: 10px;
+  }
+  .timeline-header h3 { font-size: 1.2rem; color: #1e3a5f; }
+  .timeline {
+    position: relative;
+    padding-left: 28px;
+  }
+  .timeline::before {
+    content: '';
+    position: absolute; left: 8px; top: 0; bottom: 0;
+    width: 3px; background: #cbd5e1; border-radius: 2px;
+  }
+  .tl-item {
+    position: relative;
+    margin-bottom: 24px;
+    background: #fff; border-radius: 10px; padding: 18px;
+    box-shadow: 0 1px 6px rgba(0,0,0,.06);
+  }
+  .tl-item::before {
+    content: '';
+    position: absolute; left: -24px; top: 22px;
+    width: 12px; height: 12px; border-radius: 50%;
+    background: #3b82c4; border: 3px solid #eef2f7;
+  }
+  .tl-date {
+    font-size: .8rem; color: #64748b; font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .tl-content { font-size: .95rem; white-space: pre-wrap; }
+  .tl-image {
+    margin-top: 10px;
+  }
+  .tl-image img {
+    max-width: 100%; max-height: 320px;
+    border-radius: 8px; object-fit: cover;
+    cursor: pointer; transition: opacity .2s;
+  }
+  .tl-image img:hover { opacity: .9; }
+  .tl-actions {
+    margin-top: 10px; display: flex; gap: 8px;
+  }
+  .tl-btn {
+    font-size: .78rem; padding: 3px 10px; border-radius: 6px;
+    border: none; cursor: pointer;
+  }
+  .tl-btn-del { background: #fee2e2; color: #dc2626; }
+  .tl-btn-del:hover { background: #fecaca; }
+  .tl-empty {
+    text-align: center; padding: 30px; color: #94a3b8;
+    font-size: .95rem;
+  }
+
+  /* File input */
+  .form-group input[type="file"] {
+    border: none; padding: 6px 0;
+  }
+
   /* Responsive */
   @media (max-width: 600px) {
     .header-inner { flex-direction: column; align-items: flex-start; }
@@ -199,6 +286,7 @@ CSS = """
     .card-grid { grid-template-columns: 1fr; }
     .detail-actions { flex-direction: column; }
     .btn { width: 100%; text-align: center; }
+    .timeline { padding-left: 24px; }
   }
 </style>
 """
@@ -269,6 +357,31 @@ def _birthday_sort_key(person):
     if days is None:
         return 9999
     return days
+
+
+def _upload_image(file_storage):
+    """Upload image to Cloudinary and return the secure URL, or None."""
+    if not file_storage or not file_storage.filename:
+        return None
+    try:
+        result = cloudinary.uploader.upload(
+            file_storage,
+            folder="people-wiki",
+            transformation=[{"width": 1200, "crop": "limit"}],
+            resource_type="image",
+        )
+        return result.get("secure_url")
+    except Exception:
+        return None
+
+
+def _format_event_date(d):
+    """Format 'YYYY-MM-DD' as 'YYYY年M月D日'."""
+    try:
+        y, m, d = int(d[:4]), int(d[5:7]), int(d[8:10])
+        return f"{y}年{m}月{d}日"
+    except (ValueError, IndexError):
+        return str(escape(d))
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +536,28 @@ def detail(person_id):
         cls = f' class="{css_class}"' if css_class else ""
         return f'<div class="detail-row"><div class="detail-label">{label}</div><div class="detail-value"{cls}>{escape(value)}</div></div>'
 
+    # Build timeline HTML
+    timeline_items = ""
+    for ev in person.events:
+        img_html = ""
+        if ev.image_url:
+            img_html = f'<div class="tl-image"><a href="{escape(ev.image_url)}" target="_blank"><img src="{escape(ev.image_url)}" alt="event photo" loading="lazy"></a></div>'
+        timeline_items += f"""
+        <div class="tl-item">
+          <div class="tl-date">{_format_event_date(ev.event_date)}</div>
+          <div class="tl-content">{escape(ev.content)}</div>
+          {img_html}
+          <div class="tl-actions">
+            <form method="post" action="/event/{ev.id}/delete"
+                  onsubmit="return confirm('このイベントを削除しますか？');">
+              <button type="submit" class="tl-btn tl-btn-del">削除</button>
+            </form>
+          </div>
+        </div>"""
+
+    if not person.events:
+        timeline_items = '<div class="tl-empty">まだイベントがありません</div>'
+
     body = f"""
     <div class="detail-card">
       <h2>{escape(person.name)}</h2>
@@ -439,6 +574,16 @@ def detail(person_id):
           <button type="submit" class="btn btn-danger">削除</button>
         </form>
         <a href="/" class="btn btn-secondary">一覧に戻る</a>
+      </div>
+    </div>
+
+    <div class="timeline-section">
+      <div class="timeline-header">
+        <h3>沿革</h3>
+        <a href="/person/{person.id}/events/add" class="btn btn-primary" style="padding:8px 18px;font-size:.9rem;">+ イベントを追加</a>
+      </div>
+      <div class="timeline">
+        {timeline_items}
       </div>
     </div>"""
     return layout(person.name, body)
@@ -473,6 +618,77 @@ def delete(person_id):
         db.session.delete(person)
         db.session.commit()
     return redirect(url_for("index"))
+
+
+# ---------------------------------------------------------------------------
+# Event routes
+# ---------------------------------------------------------------------------
+
+@app.route("/person/<int:person_id>/events/add", methods=["GET", "POST"])
+def add_event(person_id):
+    person = db.session.get(Person, person_id)
+    if not person:
+        return layout("見つかりません", '<div class="empty"><p>指定された人物が見つかりません。</p></div>'), 404
+
+    if request.method == "POST":
+        event_date = request.form.get("event_date", "").strip()
+        content = request.form.get("content", "").strip()
+        if not event_date or not content:
+            return layout("イベント追加", _event_form(person, error="日付と内容は必須です。")), 400
+
+        image_url = _upload_image(request.files.get("image"))
+
+        event = Event(
+            person_id=person.id,
+            event_date=event_date,
+            content=content,
+            image_url=image_url,
+        )
+        db.session.add(event)
+        person.updated_at = datetime.now()
+        db.session.commit()
+        return redirect(url_for("detail", person_id=person.id))
+
+    return layout("イベント追加", _event_form(person))
+
+
+def _event_form(person, error=None):
+    err_html = f'<p style="color:#e74c3c;margin-bottom:12px;">{escape(error)}</p>' if error else ""
+    today = datetime.now().strftime("%Y-%m-%d")
+    return f"""
+    <div class="form-card">
+      <h2>{escape(person.name)} - イベント追加</h2>
+      {err_html}
+      <form method="post" action="/person/{person.id}/events/add" enctype="multipart/form-data">
+        <div class="form-group">
+          <label for="event_date">日付 <span style="color:#e74c3c;">*</span></label>
+          <input type="date" id="event_date" name="event_date" value="{today}" required>
+        </div>
+        <div class="form-group">
+          <label for="content">内容 <span style="color:#e74c3c;">*</span></label>
+          <textarea id="content" name="content" placeholder="何があったかを記録..."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="image">写真（任意・1枚まで）</label>
+          <input type="file" id="image" name="image" accept="image/*">
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button type="submit" class="btn btn-primary">追加する</button>
+          <a href="/person/{person.id}" class="btn btn-secondary">キャンセル</a>
+        </div>
+      </form>
+    </div>"""
+
+
+@app.route("/event/<int:event_id>/delete", methods=["POST"])
+def delete_event(event_id):
+    event = db.session.get(Event, event_id)
+    if not event:
+        return redirect(url_for("index"))
+    person_id = event.person_id
+    db.session.delete(event)
+    db.session.commit()
+    return redirect(url_for("detail", person_id=person_id))
 
 
 # ---------------------------------------------------------------------------
