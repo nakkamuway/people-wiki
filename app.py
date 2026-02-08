@@ -360,9 +360,11 @@ def _birthday_sort_key(person):
 
 
 def _upload_image(file_storage):
-    """Upload image to Cloudinary and return the secure URL, or None."""
+    """Upload image to Cloudinary. Returns (url, error_message)."""
     if not file_storage or not file_storage.filename:
-        return None
+        return None, None
+    if not os.environ.get("CLOUDINARY_URL"):
+        return None, "CLOUDINARY_URL が設定されていません。Render の環境変数を確認してください。"
     try:
         result = cloudinary.uploader.upload(
             file_storage,
@@ -370,9 +372,9 @@ def _upload_image(file_storage):
             transformation=[{"width": 1200, "crop": "limit"}],
             resource_type="image",
         )
-        return result.get("secure_url")
-    except Exception:
-        return None
+        return result.get("secure_url"), None
+    except Exception as e:
+        return None, f"画像アップロードに失敗しました: {e}"
 
 
 def _format_event_date(d):
@@ -636,7 +638,9 @@ def add_event(person_id):
         if not event_date or not content:
             return layout("イベント追加", _event_form(person, error="日付と内容は必須です。")), 400
 
-        image_url = _upload_image(request.files.get("image"))
+        image_url, upload_err = _upload_image(request.files.get("image"))
+        if upload_err:
+            return layout("イベント追加", _event_form(person, error=upload_err)), 400
 
         event = Event(
             person_id=person.id,
