@@ -40,6 +40,10 @@ class Person(db.Model):
     met_at = db.Column(db.String)
     birthday = db.Column(db.String)
     notes = db.Column(db.Text)
+    twitter = db.Column(db.String)
+    instagram = db.Column(db.String)
+    facebook = db.Column(db.String)
+    linkedin = db.Column(db.String)
     created_at = db.Column(db.DateTime, default=datetime.now)
     updated_at = db.Column(db.DateTime, default=datetime.now)
 
@@ -86,16 +90,25 @@ class FamilyMember(db.Model):
 
 with app.app_context():
     db.create_all()
-    # Migrate: add linked_person_id if missing (for existing DBs)
+    # Migrate: add columns if missing (for existing DBs)
     with db.engine.connect() as conn:
         from sqlalchemy import text, inspect
         inspector = inspect(db.engine)
-        cols = [c["name"] for c in inspector.get_columns("family_members")]
-        if "linked_person_id" not in cols:
+
+        # Add linked_person_id to family_members
+        fm_cols = [c["name"] for c in inspector.get_columns("family_members")]
+        if "linked_person_id" not in fm_cols:
             conn.execute(text(
                 "ALTER TABLE family_members ADD COLUMN linked_person_id INTEGER REFERENCES people(id)"
             ))
             conn.commit()
+
+        # Add SNS columns to people
+        people_cols = [c["name"] for c in inspector.get_columns("people")]
+        for sns_col in ["twitter", "instagram", "facebook", "linkedin"]:
+            if sns_col not in people_cols:
+                conn.execute(text(f"ALTER TABLE people ADD COLUMN {sns_col} VARCHAR"))
+                conn.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +136,7 @@ CSS = """
     box-shadow: 0 2px 8px rgba(0,0,0,.15);
   }
   .header-inner {
-    max-width: 960px; margin: 0 auto; padding: 0 20px;
+    max-width: 1400px; margin: 0 auto; padding: 0 32px;
     display: flex; align-items: center; justify-content: space-between;
     flex-wrap: wrap; gap: 10px;
   }
@@ -136,7 +149,7 @@ CSS = """
   .header-nav a:hover { color: #fff; text-decoration: none; }
 
   /* Container */
-  .container { max-width: 960px; margin: 28px auto; padding: 0 20px; }
+  .container { max-width: 1400px; margin: 28px auto; padding: 0 32px; }
 
   /* Search */
   .search-form { margin-bottom: 24px; display: flex; gap: 8px; }
@@ -152,24 +165,139 @@ CSS = """
   }
   .search-form button:hover { background: #2b6cb0; }
 
-  /* Cards */
-  .card-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 18px;
-  }
-  .card {
-    background: #fff; border-radius: 12px; padding: 20px;
-    box-shadow: 0 2px 8px rgba(0,0,0,.06);
-    transition: box-shadow .2s, transform .2s;
-  }
-  .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.12); transform: translateY(-2px); }
-  .card h3 { font-size: 1.15rem; margin-bottom: 6px; }
-  .card .meta { font-size: .85rem; color: #64748b; margin-bottom: 8px; }
-  .card .notes-preview {
-    font-size: .9rem; color: #475569;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  /* Dashboard Table */
+  .dashboard-table {
+    background: #fff;
+    border-radius: 12px;
     overflow: hidden;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    width: 100%;
+  }
+  .table-header {
+    display: grid;
+    grid-template-columns: minmax(200px, 2.5fr) minmax(150px, 1.5fr) minmax(120px, 1.3fr) minmax(180px, 2fr) minmax(120px, 1.2fr);
+    gap: 24px;
+    padding: 18px 28px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: .8rem;
+    font-weight: 700;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+  }
+  .table-row {
+    display: grid;
+    grid-template-columns: minmax(200px, 2.5fr) minmax(150px, 1.5fr) minmax(120px, 1.3fr) minmax(180px, 2fr) minmax(120px, 1.2fr);
+    gap: 24px;
+    padding: 20px 28px;
+    border-bottom: 1px solid #f1f5f9;
+    transition: background .15s ease, box-shadow .15s ease;
+    cursor: pointer;
+    align-items: center;
+  }
+  .table-row:hover {
+    background: #f8fafc;
+    box-shadow: inset 4px 0 0 #3b82c4;
+  }
+  .table-row:last-child {
+    border-bottom: none;
+  }
+  .table-cell {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .table-cell-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1e293b;
+  }
+  .table-cell-org {
+    font-size: .9rem;
+    color: #64748b;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .table-cell-date {
+    font-size: .85rem;
+    color: #94a3b8;
+  }
+  .table-cell-family {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: .85rem;
+  }
+  .family-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    background: #f1f5f9;
+    border-radius: 12px;
+    color: #475569;
+    font-size: .8rem;
+    white-space: nowrap;
+  }
+  .family-tag-icon {
+    margin-right: 4px;
+    font-size: .7rem;
+  }
+  .table-cell-sns {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+  }
+  .sns-icons-container {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: nowrap;
+  }
+  .sns-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    transition: all .2s ease;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+  .sns-icon:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,.15);
+  }
+  .sns-icon svg {
+    width: 18px;
+    height: 18px;
+    fill: currentColor;
+    flex-shrink: 0;
+  }
+  .sns-icon.twitter {
+    background: #1DA1F2;
+    color: #fff;
+  }
+  .sns-icon.instagram {
+    background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
+    color: #fff;
+  }
+  .sns-icon.facebook {
+    background: #1877F2;
+    color: #fff;
+  }
+  .sns-icon.linkedin {
+    background: #0A66C2;
+    color: #fff;
+  }
+  .sns-icon-empty {
+    color: #e2e8f0;
+    font-size: .85rem;
   }
 
   /* Detail */
@@ -188,7 +316,7 @@ CSS = """
   .form-card {
     background: #fff; border-radius: 12px; padding: 28px;
     box-shadow: 0 2px 10px rgba(0,0,0,.07);
-    max-width: 600px; margin: 0 auto;
+    max-width: 700px; margin: 0 auto;
   }
   .form-card h2 { font-size: 1.35rem; margin-bottom: 20px; color: #1e3a5f; }
   .form-group { margin-bottom: 16px; }
@@ -245,7 +373,7 @@ CSS = """
 
   /* Flash */
   .flash {
-    max-width: 960px; margin: 16px auto 0; padding: 12px 20px;
+    max-width: 1400px; margin: 16px auto 0; padding: 12px 32px;
     background: #d1fae5; color: #065f46; border-radius: 8px;
     font-size: .95rem;
   }
@@ -259,6 +387,12 @@ CSS = """
     margin-bottom: 16px; flex-wrap: wrap; gap: 10px;
   }
   .section-header h3 { font-size: 1.2rem; color: #1e3a5f; }
+  .section-add-btn {
+    display: none;
+  }
+  body.editing .section-add-btn {
+    display: inline-block;
+  }
 
   /* Accordion Timeline */
   .timeline {
@@ -308,8 +442,8 @@ CSS = """
   }
   .acc-item.open .acc-toggle { background: #f0f7ff; border-color: #bdd7f1; border-radius: 10px 10px 0 0; }
   .acc-item.open .acc-arrow { transform: rotate(90deg); }
-  .acc-item.open .acc-body { max-height: 600px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 10px 10px; background: #fff; }
-  .acc-content { font-size: .95rem; white-space: pre-wrap; }
+  .acc-item.open .acc-body { max-height: none; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 10px 10px; background: #fff; }
+  .acc-content { font-size: .95rem; white-space: pre-wrap; word-wrap: break-word; overflow-wrap: break-word; }
   .acc-image { margin-top: 10px; }
   .acc-image img {
     max-width: 100%; max-height: 320px;
@@ -317,11 +451,19 @@ CSS = """
     cursor: pointer; transition: opacity .2s;
   }
   .acc-image img:hover { opacity: .9; }
-  .acc-actions { margin-top: 10px; }
+  .acc-actions {
+    margin-top: 10px;
+    display: none;
+  }
+  body.editing .acc-actions {
+    display: block;
+  }
   .tl-btn {
     font-size: .78rem; padding: 3px 10px; border-radius: 6px;
-    border: none; cursor: pointer;
+    border: none; cursor: pointer; margin-right: 6px;
   }
+  .tl-btn-edit { background: #dbeafe; color: #1e40af; }
+  .tl-btn-edit:hover { background: #bfdbfe; }
   .tl-btn-del { background: #fee2e2; color: #dc2626; }
   .tl-btn-del:hover { background: #fecaca; }
   .tl-empty {
@@ -367,6 +509,12 @@ CSS = """
     text-align: center; padding: 24px; color: #94a3b8;
     font-size: .95rem;
   }
+  .family-delete-btn {
+    display: none;
+  }
+  body.editing .family-delete-btn {
+    display: block;
+  }
 
   /* File input */
   .form-group input[type="file"] {
@@ -379,14 +527,143 @@ CSS = """
   }
   .form-group select:focus { border-color: #3b82c4; }
 
-  /* Responsive */
+  /* View/Edit Mode Toggle */
+  .mode-toggle {
+    margin-bottom: 24px;
+    padding-bottom: 24px;
+    border-bottom: 2px solid #e2e8f0;
+  }
+  .btn-edit-mode {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: #fff;
+    padding: 14px 32px;
+    border-radius: 12px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    transition: all .3s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .btn-edit-mode:hover {
+    background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.5);
+    transform: translateY(-2px);
+  }
+  .btn-edit-mode:active {
+    transform: translateY(0);
+  }
+  .edit-mode-actions {
+    display: none;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .edit-mode-field {
+    display: none;
+  }
+  .view-mode-only {
+    display: block;
+  }
+  body.editing .edit-mode-actions {
+    display: flex;
+  }
+  body.editing .edit-mode-field {
+    display: block;
+  }
+  body.editing .view-mode-only {
+    display: none;
+  }
+  body.editing .mode-toggle {
+    background: #fef3c7;
+    padding: 12px;
+    border-radius: 8px;
+    border-bottom: none;
+  }
+  body.editing .detail-value {
+    background: #fffbeb;
+    padding: 8px 12px;
+    border-radius: 6px;
+    border: 1px solid #fcd34d;
+  }
+  .edit-field {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    font-size: 1rem;
+    font-family: inherit;
+    outline: none;
+    transition: border .2s;
+  }
+  .edit-field:focus {
+    border-color: #3b82c4;
+  }
+  .edit-field.textarea {
+    min-height: 100px;
+    resize: vertical;
+  }
+
+  /* Responsive - タブレット以下のみ */
+  @media (max-width: 768px) {
+    .table-header, .table-row {
+      grid-template-columns: minmax(120px, 2fr) minmax(100px, 1fr) minmax(120px, 1.5fr) minmax(80px, 1fr);
+      gap: 12px;
+      padding: 14px 16px;
+    }
+    .table-cell-date {
+      display: none !important;
+    }
+    .table-header > div:nth-child(3) {
+      display: none !important;
+    }
+    .table-cell-family {
+      font-size: .75rem;
+    }
+    .family-tag {
+      font-size: .7rem;
+      padding: 3px 8px;
+    }
+    .sns-icon {
+      width: 28px;
+      height: 28px;
+    }
+    .sns-icon svg {
+      width: 14px;
+      height: 14px;
+    }
+    .sns-icons-container {
+      gap: 4px;
+    }
+  }
   @media (max-width: 600px) {
     .header-inner { flex-direction: column; align-items: flex-start; }
     .header-nav a { margin-left: 0; margin-right: 14px; }
-    .card-grid { grid-template-columns: 1fr; }
     .detail-actions { flex-direction: column; }
     .btn { width: 100%; text-align: center; }
     .timeline { padding-left: 24px; }
+    .table-header {
+      display: none;
+    }
+    .table-row {
+      grid-template-columns: 1fr;
+      gap: 8px;
+      padding: 16px;
+    }
+    .table-cell {
+      display: block;
+    }
+    .table-cell::before {
+      content: attr(data-label);
+      font-size: .75rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      display: block;
+      margin-bottom: 4px;
+    }
   }
 </style>
 """
@@ -419,12 +696,56 @@ def layout(title, body, flash_msg=None):
     {body}
   </div>
   <script>
+  // Accordion toggle
   document.addEventListener('click', function(e) {{
     var toggle = e.target.closest('.acc-toggle');
     if (!toggle) return;
     var item = toggle.closest('.acc-item');
     if (item) item.classList.toggle('open');
   }});
+
+  // Edit mode functions
+  function enterEditMode() {{
+    document.body.classList.add('editing');
+  }}
+
+  function cancelEdit() {{
+    document.body.classList.remove('editing');
+  }}
+
+  function confirmDelete() {{
+    var personName = document.querySelector('.detail-card h2').textContent;
+    if (confirm('「' + personName + '」を削除してよろしいですか？')) {{
+      var form = document.createElement('form');
+      form.method = 'POST';
+      form.action = window.location.pathname + '/delete';
+      document.body.appendChild(form);
+      form.submit();
+    }}
+  }}
+
+  // Handle form submission
+  var editForm = document.getElementById('edit-form');
+  if (editForm) {{
+    editForm.addEventListener('submit', function(e) {{
+      e.preventDefault();
+      var formData = new FormData(this);
+      fetch(this.action, {{
+        method: 'POST',
+        body: formData
+      }})
+      .then(response => {{
+        if (response.ok) {{
+          window.location.reload();
+        }} else {{
+          alert('更新に失敗しました。');
+        }}
+      }})
+      .catch(error => {{
+        alert('エラーが発生しました: ' + error);
+      }});
+    }});
+  }}
   </script>
 </body>
 </html>"""
@@ -534,39 +855,86 @@ def index():
     else:
         rows = query.order_by(Person.updated_at.desc()).all()
 
-    cards = ""
+    # Build table rows
+    table_rows = ""
     for r in rows:
-        org = f'<div class="meta">{escape(r.organization)}</div>' if r.organization else ""
-        bd_display, bd_days = _format_birthday(r.birthday)
-        bd_html = ""
-        if bd_display:
-            badge = ""
-            if bd_days is not None and bd_days == 0:
-                badge = ' <span class="birthday-badge today">TODAY!</span>'
-            elif bd_days is not None and bd_days <= 7:
-                badge = f' <span class="birthday-badge soon">あと{bd_days}日</span>'
-            bd_html = f'<div class="meta birthday-meta">{bd_display}{badge}</div>'
-        notes = f'<div class="notes-preview">{escape(r.notes)}</div>' if r.notes else ""
-        cards += f"""
-        <a href="/person/{r.id}" style="text-decoration:none;color:inherit;">
-          <div class="card">
-            <h3>{escape(r.name)}</h3>
-            {org}
-            {bd_html}
-            {notes}
-          </div>
-        </a>"""
+        # Organization
+        org_display = escape(r.organization) if r.organization else '<span style="color:#cbd5e1;">未設定</span>'
+
+        # Registration date (formatted)
+        reg_date = r.created_at.strftime("%Y年%m月%d日") if r.created_at else "不明"
+
+        # Family members
+        family_tags = ""
+        family_count = 0
+        for fm in r.family_members:
+            if family_count >= 3:  # Limit to 3 tags for display
+                remaining = len(r.family_members) - 3
+                family_tags += f'<span class="family-tag">+{remaining}名</span>'
+                break
+            # Use linked person's name if available
+            display_name = fm.name
+            if fm.linked_person_id and fm.linked_person:
+                display_name = fm.linked_person.name
+            family_tags += f'<span class="family-tag"><span class="family-tag-icon">👤</span>{escape(display_name)}</span>'
+            family_count += 1
+
+        if not family_tags:
+            family_tags = '<span style="color:#cbd5e1;font-size:.85rem;">―</span>'
+
+        # SNS icons - build list of icons
+        sns_icon_list = []
+        if r.twitter:
+            sns_icon_list.append(f'<a href="{escape(r.twitter)}" class="sns-icon twitter" target="_blank" rel="noopener" onclick="event.stopPropagation();"><svg viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>')
+        if r.instagram:
+            sns_icon_list.append(f'<a href="{escape(r.instagram)}" class="sns-icon instagram" target="_blank" rel="noopener" onclick="event.stopPropagation();"><svg viewBox="0 0 24 24"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/></svg></a>')
+        if r.facebook:
+            sns_icon_list.append(f'<a href="{escape(r.facebook)}" class="sns-icon facebook" target="_blank" rel="noopener" onclick="event.stopPropagation();"><svg viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg></a>')
+        if r.linkedin:
+            sns_icon_list.append(f'<a href="{escape(r.linkedin)}" class="sns-icon linkedin" target="_blank" rel="noopener" onclick="event.stopPropagation();"><svg viewBox="0 0 24 24"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg></a>')
+
+        # Wrap icons in a container div for proper layout
+        if sns_icon_list:
+            sns_icons_html = f'<div class="sns-icons-container">{"".join(sns_icon_list)}</div>'
+        else:
+            sns_icons_html = '<span class="sns-icon-empty">―</span>'
+
+        table_rows += f"""
+        <div class="table-row" onclick="window.location.href='/person/{r.id}'">
+          <div class="table-cell table-cell-name">{escape(r.name)}</div>
+          <div class="table-cell table-cell-org">{org_display}</div>
+          <div class="table-cell table-cell-date">{reg_date}</div>
+          <div class="table-cell table-cell-family">{family_tags}</div>
+          <div class="table-cell table-cell-sns">{sns_icons_html}</div>
+        </div>"""
 
     if not rows:
         if q:
-            cards = f'<div class="empty"><p>「{escape(q)}」に一致する人物は見つかりませんでした。</p><a href="/" class="btn btn-secondary">一覧に戻る</a></div>'
+            table_rows = f'<div class="empty"><p>「{escape(q)}」に一致する人物は見つかりませんでした。</p><a href="/" class="btn btn-secondary">一覧に戻る</a></div>'
         else:
-            cards = '<div class="empty"><p>まだ人物が登録されていません。</p><a href="/add" class="btn btn-primary">最初の人物を登録する</a></div>'
+            table_rows = '<div class="empty"><p>まだ人物が登録されていません。</p><a href="/add" class="btn btn-primary">最初の人物を登録する</a></div>'
 
     search_val = escape(q) if q else ""
     sort_updated_cls = "active" if sort != "birthday" else ""
     sort_birthday_cls = "active" if sort == "birthday" else ""
     q_param = f"&q={search_val}" if q else ""
+
+    # Build table HTML
+    if rows:
+        table_html = f"""
+        <div class="dashboard-table">
+          <div class="table-header">
+            <div>名前</div>
+            <div>所属</div>
+            <div>登録日</div>
+            <div>家族</div>
+            <div>SNS</div>
+          </div>
+          {table_rows}
+        </div>"""
+    else:
+        table_html = table_rows  # Empty state
+
     body = f"""
     <form class="search-form" action="/" method="get">
       <input type="text" name="q" placeholder="名前・所属・メモで検索..." value="{search_val}">
@@ -577,9 +945,7 @@ def index():
       <a href="/?sort=updated{q_param}" class="sort-btn {sort_updated_cls}">更新日順</a>
       <a href="/?sort=birthday{q_param}" class="sort-btn {sort_birthday_cls}">誕生日が近い順</a>
     </div>
-    <div class="card-grid">
-      {cards}
-    </div>
+    {table_html}
     """
     return layout("一覧", body)
 
@@ -590,7 +956,8 @@ def add():
         name = request.form.get("name", "").strip()
         if not name:
             link_fid = request.form.get("link_family_id", "")
-            return layout("新規登録", _form("名前は必須です。", prefill_name="", link_family_id=link_fid)), 400
+            prefill_bd = request.form.get("birthday", "").strip()
+            return layout("新規登録", _form("名前は必須です。", prefill_name="", prefill_birthday=prefill_bd, link_family_id=link_fid)), 400
         person = Person(
             name=name,
             organization=request.form.get("organization", "").strip(),
@@ -614,16 +981,17 @@ def add():
 
     # GET: check for prefill params from family link
     prefill_name = request.args.get("name", "")
+    prefill_birthday = request.args.get("birthday", "")
     link_family_id = request.args.get("link_family_id", "")
-    return layout("新規登録", _form(prefill_name=prefill_name, link_family_id=link_family_id))
+    return layout("新規登録", _form(prefill_name=prefill_name, prefill_birthday=prefill_birthday, link_family_id=link_family_id))
 
 
-def _form(error=None, person=None, prefill_name="", link_family_id=""):
+def _form(error=None, person=None, prefill_name="", prefill_birthday="", link_family_id=""):
     err_html = f'<p style="color:#e74c3c;margin-bottom:12px;">{escape(error)}</p>' if error else ""
     name = escape(person.name) if person else escape(prefill_name)
     org = escape(person.organization or "") if person else ""
     met = escape(person.met_at or "") if person else ""
-    birthday = escape(person.birthday or "") if person else ""
+    birthday = escape(person.birthday or "") if person else escape(prefill_birthday)
     notes = escape(person.notes or "") if person else ""
     action = f'/edit/{person.id}' if person else "/add"
     title = "人物情報を編集" if person else "新しい人物を登録"
@@ -631,7 +999,8 @@ def _form(error=None, person=None, prefill_name="", link_family_id=""):
     hidden = f'<input type="hidden" name="link_family_id" value="{escape(link_family_id)}">' if link_family_id else ""
     link_note = ""
     if link_family_id and not person:
-        link_note = '<p style="color:#3b82c4;margin-bottom:12px;font-size:.9rem;">家族メンバーから新規登録 — 登録すると自動的にリンクされます</p>'
+        birthday_note = " （生年月日も自動入力されました）" if prefill_birthday else ""
+        link_note = f'<p style="color:#3b82c4;margin-bottom:12px;font-size:.9rem;">✨ 家族メンバーから新規登録 — 登録すると自動的にリンクされます{birthday_note}</p>'
 
     return f"""
     <div class="form-card">
@@ -674,11 +1043,36 @@ def detail(person_id):
     if not person:
         return layout("見つかりません", '<div class="empty"><p>指定された人物が見つかりません。</p><a href="/" class="btn btn-secondary">一覧に戻る</a></div>'), 404
 
-    def row(label, value, css_class=""):
-        if not value:
+    def row(label, value, field_name="", css_class="", input_type="text"):
+        """Generate a row with view and edit modes"""
+        if not value and not field_name:
             return ""
+
+        # View mode display
+        if input_type == "url" and value:
+            view_val = f'<a href="{escape(value)}" target="_blank" rel="noopener" style="color:#3b82c4;">{escape(value)}</a>'
+        else:
+            view_val = escape(value) if value else '<span style="color:#94a3b8;">未設定</span>'
         cls = f' class="{css_class}"' if css_class else ""
-        return f'<div class="detail-row"><div class="detail-label">{label}</div><div class="detail-value"{cls}>{escape(value)}</div></div>'
+
+        # Edit mode input
+        edit_input = ""
+        if field_name:
+            val_escaped = escape(value) if value else ""
+            if input_type == "textarea":
+                edit_input = f'<textarea class="edit-field textarea" name="{field_name}" data-field="{field_name}">{val_escaped}</textarea>'
+            elif input_type == "date":
+                edit_input = f'<input type="date" class="edit-field" name="{field_name}" value="{val_escaped}" data-field="{field_name}">'
+            elif input_type == "url":
+                edit_input = f'<input type="url" class="edit-field" name="{field_name}" value="{val_escaped}" data-field="{field_name}" placeholder="https://...">'
+            else:
+                edit_input = f'<input type="text" class="edit-field" name="{field_name}" value="{val_escaped}" data-field="{field_name}">'
+
+        return f'''<div class="detail-row">
+          <div class="detail-label">{label}</div>
+          <div class="detail-value view-mode-only"{cls}>{view_val}</div>
+          <div class="edit-mode-field">{edit_input}</div>
+        </div>'''
 
     # Build accordion timeline HTML
     timeline_items = ""
@@ -698,7 +1092,8 @@ def detail(person_id):
             <div class="acc-content">{escape(ev.content)}</div>
             {img_html}
             <div class="acc-actions">
-              <form method="post" action="/event/{ev.id}/delete"
+              <a href="/event/{ev.id}/edit" class="tl-btn tl-btn-edit">編集</a>
+              <form method="post" action="/event/{ev.id}/delete" style="display:inline;"
                     onsubmit="return confirm('このイベントを削除しますか？');">
                 <button type="submit" class="tl-btn tl-btn-del">削除</button>
               </form>
@@ -712,15 +1107,27 @@ def detail(person_id):
     # Build family members HTML
     family_items = ""
     for fm in person.family_members:
-        age = _calc_age(fm.birthday)
-        age_html = f'<div class="family-age">{fm.birthday}（{age}歳）</div>' if age is not None else ""
-        if not age_html and fm.birthday:
-            age_html = f'<div class="family-age">{escape(fm.birthday)}</div>'
-        # Clickable name: linked → detail page, not linked → add page with name prefilled
+        # Get actual name: use linked person's name if available, otherwise use family member's name
+        display_name = fm.name
+        display_birthday = fm.birthday
+        if fm.linked_person_id and fm.linked_person:
+            display_name = fm.linked_person.name
+            # Use linked person's birthday if family member birthday is not set
+            if not display_birthday and fm.linked_person.birthday:
+                display_birthday = fm.linked_person.birthday
+
+        age = _calc_age(display_birthday)
+        age_html = f'<div class="family-age">{display_birthday}（{age}歳）</div>' if age is not None else ""
+        if not age_html and display_birthday:
+            age_html = f'<div class="family-age">{escape(display_birthday)}</div>'
+
+        # Clickable name: linked → detail page, not linked → add page with name and birthday prefilled
         if fm.linked_person_id:
-            name_html = f'<a href="/person/{fm.linked_person_id}" class="family-name">{escape(fm.name)}</a><span class="family-link-badge">図鑑登録済</span>'
+            name_html = f'<a href="/person/{fm.linked_person_id}" class="family-name">{escape(display_name)}</a><span class="family-link-badge">図鑑登録済</span>'
         else:
-            name_html = f'<a href="/add?name={quote(fm.name)}&amp;link_family_id={fm.id}" class="family-name">{escape(fm.name)}</a><span class="family-link-new">未登録</span>'
+            # Include birthday in URL if available
+            birthday_param = f'&amp;birthday={quote(display_birthday)}' if display_birthday else ''
+            name_html = f'<a href="/add?name={quote(display_name)}&amp;link_family_id={fm.id}{birthday_param}" class="family-name">{escape(display_name)}</a><span class="family-link-new">未登録</span>'
         family_items += f"""
         <div class="family-item">
           <div class="family-info">
@@ -728,7 +1135,7 @@ def detail(person_id):
             <span class="family-rel">{escape(fm.relationship)}</span>
             {age_html}
           </div>
-          <form method="post" action="/family/{fm.id}/delete"
+          <form method="post" action="/family/{fm.id}/delete" class="family-delete-btn"
                 onsubmit="return confirm('この家族メンバーを削除しますか？');">
             <button type="submit" class="tl-btn tl-btn-del">削除</button>
           </form>
@@ -751,29 +1158,80 @@ def detail(person_id):
     if not person.family_members and not reverse_fms:
         family_items = '<div class="family-empty">まだ家族が登録されていません</div>'
 
+    # Format birthday for display
+    bd_display = _format_birthday(person.birthday)[0] if person.birthday else ""
+    bd_value = person.birthday if person.birthday else ""
+
     body = f"""
     <div class="detail-card">
-      <h2>{escape(person.name)}</h2>
-      {row("所属・会社名", person.organization)}
-      {row("出会った場所・きっかけ", person.met_at)}
-      {row("誕生日", _format_birthday(person.birthday)[0] if person.birthday else None)}
-      {row("メモ・特徴", person.notes, "notes")}
-      {row("登録日", str(person.created_at))}
-      {row("最終更新", str(person.updated_at))}
-      <div class="detail-actions">
-        <a href="/edit/{person.id}" class="btn btn-primary">編集</a>
-        <form method="post" action="/delete/{person.id}" style="display:inline;"
-              onsubmit="return confirm('「{escape(person.name)}」を削除してよろしいですか？');">
-          <button type="submit" class="btn btn-danger">削除</button>
-        </form>
-        <a href="/" class="btn btn-secondary">一覧に戻る</a>
+      <div class="mode-toggle">
+        <button type="button" class="btn-edit-mode view-mode-only" onclick="enterEditMode()">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+          </svg>
+          編集を開始する
+        </button>
+        <div class="edit-mode-field" style="color:#92400e;font-weight:600;font-size:.95rem;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:inline-block;vertical-align:middle;margin-right:6px;">
+            <path d="M12 20h9"></path>
+            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+          </svg>
+          編集モード - 変更後は保存してください
+        </div>
       </div>
+
+      <h2 class="view-mode-only">{escape(person.name)}</h2>
+
+      <form id="edit-form" method="post" action="/person/{person.id}/update">
+        <div class="detail-row edit-mode-field" style="margin-bottom:20px;">
+          <div class="detail-label">名前 <span style="color:#e74c3c;">*</span></div>
+          <input type="text" class="edit-field" name="name" value="{escape(person.name)}" required data-field="name" style="font-size:1.2rem;font-weight:600;">
+        </div>
+        {row("所属・会社名", person.organization, "organization")}
+        {row("出会った場所・きっかけ", person.met_at, "met_at")}
+        <div class="detail-row">
+          <div class="detail-label">誕生日</div>
+          <div class="detail-value view-mode-only">{escape(bd_display) if bd_display else '<span style="color:#94a3b8;">未設定</span>'}</div>
+          <div class="edit-mode-field">
+            <input type="date" class="edit-field" name="birthday" value="{escape(bd_value)}" data-field="birthday">
+          </div>
+        </div>
+        {row("メモ・特徴", person.notes, "notes", "notes", "textarea")}
+
+        <div style="margin-top:24px;padding-top:24px;border-top:1px solid #e2e8f0;">
+          <h3 style="font-size:1.1rem;margin-bottom:16px;color:#1e3a5f;">SNS・ウェブサイト</h3>
+          {row("X (Twitter)", person.twitter, "twitter", "", "url")}
+          {row("Instagram", person.instagram, "instagram", "", "url")}
+          {row("Facebook", person.facebook, "facebook", "", "url")}
+          {row("LinkedIn", person.linkedin, "linkedin", "", "url")}
+        </div>
+
+        <div class="detail-row view-mode-only">
+          <div class="detail-label">登録日</div>
+          <div class="detail-value">{escape(str(person.created_at))}</div>
+        </div>
+        <div class="detail-row view-mode-only">
+          <div class="detail-label">最終更新</div>
+          <div class="detail-value">{escape(str(person.updated_at))}</div>
+        </div>
+
+        <div class="detail-actions view-mode-only">
+          <a href="/" class="btn btn-secondary">一覧に戻る</a>
+        </div>
+
+        <div class="detail-actions edit-mode-actions">
+          <button type="submit" class="btn btn-primary">💾 保存する</button>
+          <button type="button" class="btn btn-secondary" onclick="cancelEdit()">キャンセル</button>
+          <button type="button" class="btn btn-danger" onclick="confirmDelete()">削除</button>
+        </div>
+      </form>
     </div>
 
     <div class="section-card">
       <div class="section-header">
         <h3>家族</h3>
-        <a href="/person/{person.id}/family/add" class="btn btn-primary" style="padding:8px 18px;font-size:.9rem;">+ 家族を追加</a>
+        <a href="/person/{person.id}/family/add" class="btn btn-primary section-add-btn" style="padding:8px 18px;font-size:.9rem;">+ 家族を追加</a>
       </div>
       <div class="family-list">
         {family_items}
@@ -783,7 +1241,7 @@ def detail(person_id):
     <div class="section-card">
       <div class="section-header">
         <h3>沿革</h3>
-        <a href="/person/{person.id}/events/add" class="btn btn-primary" style="padding:8px 18px;font-size:.9rem;">+ イベントを追加</a>
+        <a href="/person/{person.id}/events/add" class="btn btn-primary section-add-btn" style="padding:8px 18px;font-size:.9rem;">+ イベントを追加</a>
       </div>
       <div class="timeline">
         {timeline_items}
@@ -816,6 +1274,44 @@ def edit(person_id):
 
 @app.route("/delete/<int:person_id>", methods=["POST"])
 def delete(person_id):
+    person = db.session.get(Person, person_id)
+    if person:
+        db.session.delete(person)
+        db.session.commit()
+    return redirect(url_for("index"))
+
+
+@app.route("/person/<int:person_id>/update", methods=["POST"])
+def update_person(person_id):
+    """Inline update from detail page"""
+    person = db.session.get(Person, person_id)
+    if not person:
+        return "Not found", 404
+
+    # Update name if provided
+    name = request.form.get("name", "").strip()
+    if name:
+        person.name = name
+
+    person.organization = request.form.get("organization", "").strip()
+    person.met_at = request.form.get("met_at", "").strip()
+    person.birthday = request.form.get("birthday", "").strip() or None
+    person.notes = request.form.get("notes", "").strip()
+
+    # Update SNS fields
+    person.twitter = request.form.get("twitter", "").strip() or None
+    person.instagram = request.form.get("instagram", "").strip() or None
+    person.facebook = request.form.get("facebook", "").strip() or None
+    person.linkedin = request.form.get("linkedin", "").strip() or None
+
+    person.updated_at = datetime.now()
+    db.session.commit()
+    return "", 200
+
+
+@app.route("/person/<int:person_id>/delete", methods=["POST"])
+def delete_person(person_id):
+    """Delete from detail page"""
     person = db.session.get(Person, person_id)
     if person:
         db.session.delete(person)
@@ -857,28 +1353,83 @@ def add_event(person_id):
     return layout("イベント追加", _event_form(person))
 
 
-def _event_form(person, error=None):
+@app.route("/event/<int:event_id>/edit", methods=["GET", "POST"])
+def edit_event(event_id):
+    event = db.session.get(Event, event_id)
+    if not event:
+        return layout("見つかりません", '<div class="empty"><p>指定されたイベントが見つかりません。</p></div>'), 404
+
+    person = db.session.get(Person, event.person_id)
+    if not person:
+        return layout("見つかりません", '<div class="empty"><p>指定された人物が見つかりません。</p></div>'), 404
+
+    if request.method == "POST":
+        event_date = request.form.get("event_date", "").strip()
+        content = request.form.get("content", "").strip()
+        if not event_date or not content:
+            return layout("イベント編集", _event_form(person, event=event, error="日付と内容は必須です。")), 400
+
+        # Handle image upload if new image provided
+        new_image = request.files.get("image")
+        if new_image and new_image.filename:
+            image_url, upload_err = _upload_image(new_image)
+            if upload_err:
+                return layout("イベント編集", _event_form(person, event=event, error=upload_err)), 400
+            event.image_url = image_url
+
+        event.event_date = event_date
+        event.content = content
+        person.updated_at = datetime.now()
+        db.session.commit()
+        return redirect(url_for("detail", person_id=person.id))
+
+    return layout("イベント編集", _event_form(person, event=event))
+
+
+def _event_form(person, event=None, error=None):
     err_html = f'<p style="color:#e74c3c;margin-bottom:12px;">{escape(error)}</p>' if error else ""
-    today = datetime.now().strftime("%Y-%m-%d")
+
+    # Set defaults for add or edit mode
+    if event:
+        title = "イベント編集"
+        action = f"/event/{event.id}/edit"
+        btn_text = "更新する"
+        event_date = escape(event.event_date)
+        content = escape(event.content)
+        current_image = event.image_url
+    else:
+        title = "イベント追加"
+        action = f"/person/{person.id}/events/add"
+        btn_text = "追加する"
+        event_date = datetime.now().strftime("%Y-%m-%d")
+        content = ""
+        current_image = None
+
+    # Show current image if exists
+    image_preview = ""
+    if current_image:
+        image_preview = f'<div style="margin-bottom:10px;"><img src="{escape(current_image)}" style="max-width:200px;max-height:200px;border-radius:8px;"><p style="font-size:.85rem;color:#64748b;margin-top:4px;">現在の写真（新しい写真をアップロードすると置き換わります）</p></div>'
+
     return f"""
     <div class="form-card">
-      <h2>{escape(person.name)} - イベント追加</h2>
+      <h2>{escape(person.name)} - {title}</h2>
       {err_html}
-      <form method="post" action="/person/{person.id}/events/add" enctype="multipart/form-data">
+      <form method="post" action="{action}" enctype="multipart/form-data">
         <div class="form-group">
           <label for="event_date">日付 <span style="color:#e74c3c;">*</span></label>
-          <input type="date" id="event_date" name="event_date" value="{today}" required>
+          <input type="date" id="event_date" name="event_date" value="{event_date}" required>
         </div>
         <div class="form-group">
           <label for="content">内容 <span style="color:#e74c3c;">*</span></label>
-          <textarea id="content" name="content" placeholder="何があったかを記録..."></textarea>
+          <textarea id="content" name="content" placeholder="何があったかを記録..." required>{content}</textarea>
         </div>
         <div class="form-group">
           <label for="image">写真（任意・1枚まで）</label>
+          {image_preview}
           <input type="file" id="image" name="image" accept="image/*">
         </div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <button type="submit" class="btn btn-primary">追加する</button>
+          <button type="submit" class="btn btn-primary">{btn_text}</button>
           <a href="/person/{person.id}" class="btn btn-secondary">キャンセル</a>
         </div>
       </form>
