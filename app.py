@@ -696,6 +696,32 @@ def delete_event(event_id):
 
 
 # ---------------------------------------------------------------------------
+# Diagnostic (TODO: remove after confirming DB setup)
+# ---------------------------------------------------------------------------
+
+@app.route("/debug/db")
+def debug_db():
+    db_url = app.config["SQLALCHEMY_DATABASE_URI"]
+    # Hide credentials, show only the type and host
+    if "postgresql" in db_url or "postgres" in db_url:
+        db_type = "PostgreSQL"
+    elif "sqlite" in db_url:
+        db_type = "SQLite (ephemeral - data will be lost on deploy!)"
+    else:
+        db_type = "Unknown"
+    people_count = Person.query.count()
+    event_count = Event.query.count()
+    has_cloudinary = bool(os.environ.get("CLOUDINARY_URL"))
+    return f"""<pre>
+DB type:      {db_type}
+DATABASE_URL: {'set' if os.environ.get('DATABASE_URL') else 'NOT SET'}
+People:       {people_count}
+Events:       {event_count}
+Cloudinary:   {'configured' if has_cloudinary else 'NOT SET'}
+</pre>"""
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
