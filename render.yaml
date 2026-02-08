@@ -1,3 +1,5 @@
+version: "1"
+
 databases:
   - name: people-wiki-db
     databaseName: peoplewiki
@@ -5,7 +7,7 @@ databases:
 services:
   - type: web
     name: people-wiki
-    env: python
+    runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app
     envVars:
