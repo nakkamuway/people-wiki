@@ -13,6 +13,12 @@
           >
             People
           </NuxtLink>
+          <NuxtLink
+            to="/map"
+            class="text-sm tracking-widest uppercase text-text-secondary hover:text-text-primary transition-colors"
+          >
+            Map
+          </NuxtLink>
           <button
             @click="handleLogout"
             class="text-sm tracking-widest uppercase text-text-muted hover:text-text-primary transition-colors"

@@ -168,18 +168,6 @@
         </div>
       </div>
 
-      <!-- Relationship Map -->
-      <div v-if="person.family?.length" class="space-y-4">
-        <h2 class="font-serif text-2xl text-text-primary">Relationship Map</h2>
-        <div class="bg-bg-secondary border border-border rounded-xl p-4">
-          <RelationshipMap
-            :person-name="person.name"
-            :family="person.family"
-            @navigate="(id: number) => navigateTo(`/people/${id}`)"
-          />
-        </div>
-      </div>
-
       <!-- Family -->
       <div class="space-y-4">
         <div class="flex items-center justify-between">
