@@ -28,3 +28,4 @@ _backup_flask/
 
 # Scripts
 scripts/
+.vercel

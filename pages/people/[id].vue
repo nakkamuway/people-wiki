@@ -168,11 +168,23 @@
         </div>
       </div>
 
+      <!-- Relationship Map -->
+      <div v-if="person.family?.length" class="space-y-4">
+        <h2 class="font-serif text-2xl text-text-primary">Relationship Map</h2>
+        <div class="bg-bg-secondary border border-border rounded-xl p-4">
+          <RelationshipMap
+            :person-name="person.name"
+            :family="person.family"
+            @navigate="(id: number) => navigateTo(`/people/${id}`)"
+          />
+        </div>
+      </div>
+
       <!-- Family -->
       <div class="space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="font-serif text-2xl text-text-primary">Family</h2>
-          <button @click="showFamilyModal = true" class="text-sm text-accent hover:text-accent-hover transition-colors">+ Add</button>
+          <button @click="openFamilyModal" class="text-sm text-accent hover:text-accent-hover transition-colors">+ Add</button>
         </div>
         <div v-if="person.family?.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <div v-for="fm in person.family" :key="fm.id" class="bg-bg-card border border-border rounded-lg p-4 flex items-center justify-between">
@@ -219,9 +231,31 @@
         <div class="bg-bg-secondary border border-border rounded-xl w-full max-w-md p-6">
           <h2 class="font-serif text-xl text-text-primary mb-4">Add Family Member</h2>
           <form @submit.prevent="addFamily" class="space-y-4">
-            <div>
+            <div class="relative">
               <label class="block text-sm text-text-secondary mb-1">Name *</label>
-              <input v-model="newFamily.name" required class="w-full bg-bg-card border border-border rounded-lg px-4 py-2.5 text-text-primary focus:outline-none focus:border-accent" />
+              <input
+                v-model="familyNameQuery"
+                required
+                autocomplete="off"
+                placeholder="名前を入力して検索..."
+                class="w-full bg-bg-card border border-border rounded-lg px-4 py-2.5 text-text-primary focus:outline-none focus:border-accent"
+                @focus="showFamilyNameDropdown = true"
+                @blur="showFamilyNameDropdown = false"
+                @input="onFamilyNameInput"
+              />
+              <div v-if="showFamilyNameDropdown && filteredPeople.length > 0" class="absolute z-10 mt-1 w-full bg-bg-card border border-border rounded-lg max-h-48 overflow-y-auto shadow-lg">
+                <button
+                  v-for="p in filteredPeople"
+                  :key="p.id"
+                  type="button"
+                  class="w-full text-left px-4 py-2.5 text-text-primary hover:bg-bg-hover transition-colors flex items-center gap-2"
+                  @mousedown.prevent="selectFamilyPerson(p)"
+                >
+                  <span>{{ p.name }}</span>
+                  <span v-if="p.organization" class="text-xs text-text-muted">{{ p.organization }}</span>
+                </button>
+              </div>
+              <p v-if="selectedFamilyPerson" class="text-xs text-accent mt-1">✓ 既存の人物とリンクされます</p>
             </div>
             <div>
               <label class="block text-sm text-text-secondary mb-1">Relationship *</label>
@@ -275,8 +309,39 @@ const editing = ref(false)
 const editForm = ref<any>({})
 const showFamilyModal = ref(false)
 const showEventModal = ref(false)
-const newFamily = ref({ name: '', relationship: '', birthday: '' })
+const newFamily = ref({ name: '', relationship: '', birthday: '', linkedPersonId: null as number | null })
 const newEvent = ref({ eventDate: '', content: '' })
+const allPeople = ref<any[]>([])
+const familyNameQuery = ref('')
+const showFamilyNameDropdown = ref(false)
+const selectedFamilyPerson = ref<any>(null)
+
+const filteredPeople = computed(() => {
+  if (!familyNameQuery.value) return allPeople.value.filter(p => p.id !== Number(route.params.id))
+  const q = familyNameQuery.value.toLowerCase()
+  return allPeople.value.filter(p =>
+    p.id !== Number(route.params.id) && (p.name.toLowerCase().includes(q) || p.organization?.toLowerCase().includes(q))
+  )
+})
+
+async function fetchAllPeople() {
+  allPeople.value = await $fetch('/api/people')
+}
+
+function onFamilyNameInput() {
+  selectedFamilyPerson.value = null
+  newFamily.value.linkedPersonId = null
+  newFamily.value.name = familyNameQuery.value
+  showFamilyNameDropdown.value = true
+}
+
+function selectFamilyPerson(p: any) {
+  familyNameQuery.value = p.name
+  newFamily.value.name = p.name
+  newFamily.value.linkedPersonId = p.id
+  selectedFamilyPerson.value = p
+  showFamilyNameDropdown.value = false
+}
 
 async function fetchPerson() {
   person.value = await $fetch(`/api/people/${route.params.id}`)
@@ -295,13 +360,20 @@ async function deletePerson() {
   navigateTo('/')
 }
 
+async function openFamilyModal() {
+  await fetchAllPeople()
+  showFamilyModal.value = true
+}
+
 async function addFamily() {
   await $fetch('/api/family', {
     method: 'POST',
     body: { ...newFamily.value, personId: Number(route.params.id) },
   })
   showFamilyModal.value = false
-  newFamily.value = { name: '', relationship: '', birthday: '' }
+  newFamily.value = { name: '', relationship: '', birthday: '', linkedPersonId: null }
+  familyNameQuery.value = ''
+  selectedFamilyPerson.value = null
   await fetchPerson()
 }
 
